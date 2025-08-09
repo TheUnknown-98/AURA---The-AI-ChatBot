@@ -1,0 +1,264 @@
+import customtkinter as ctk
+import tkinter as tk
+from tkinter import messagebox
+import os, subprocess, datetime, threading, random, webbrowser
+import pyttsx3, speech_recognition as sr
+from plyer import notification
+import pygame
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+engine = pyttsx3.init()
+engine.setProperty('rate', 160)
+wake_word = ["hey aura", "aura"]
+
+chat_box = None
+user_input = None
+status_label = None
+
+music_folder = r"C:\Users\Public\Music"  
+playlist = []
+pygame.mixer.init()
+
+responses = {
+    "hi": "Hello! I am Aura, your desktop assistant.",
+    "hello": "Hi there! Aura at your service.",
+    "how are you": "I'm Aura, and I'm always operational!",
+    "what is your name": "I am Aura, your personal assistant!",
+    "bye": "Goodbye! Have a great day!"
+}
+
+def speak(text):
+    engine.say(text)
+    engine.runAndWait()
+
+def notify(title, message):
+    try:
+        notification.notify(title=title, message=message, timeout=3)
+    except:
+        pass
+
+def load_music():
+    global playlist
+    if os.path.exists(music_folder):
+        playlist = [os.path.join(music_folder, f) for f in os.listdir(music_folder) if f.endswith(('.mp3', '.wav'))]
+        random.shuffle(playlist)
+
+def play_music():
+    if not playlist:
+        load_music()
+    if playlist:
+        current_song = playlist.pop(0)
+        pygame.mixer.music.load(current_song)
+        pygame.mixer.music.play()
+        return f"Playing {os.path.basename(current_song)}"
+    return "No music files found."
+
+def pause_music():
+    pygame.mixer.music.pause()
+    return "Music paused."
+
+def resume_music():
+    pygame.mixer.music.unpause()
+    return "Music resumed."
+
+def next_song():
+    return play_music()
+
+def manage_files(cmd):
+    cmd = cmd.lower()
+    if "downloads" in cmd:
+        subprocess.Popen(f'explorer "{os.path.expanduser("~/Downloads")}"')
+        return "Opening Downloads folder."
+    elif "pictures" in cmd or "photos" in cmd:
+        subprocess.Popen(f'explorer "{os.path.expanduser("~/Pictures")}"')
+        return "Opening Pictures folder."
+    elif "documents" in cmd:
+        subprocess.Popen(f'explorer "{os.path.expanduser("~/Documents")}"')
+        return "Opening Documents folder."
+    elif "search file" in cmd:
+        keyword = cmd.replace("search file", "").strip()
+        if keyword:
+            for root_dir, _, files in os.walk(os.path.expanduser("~")):
+                for file in files:
+                    if keyword.lower() in file.lower():
+                        subprocess.Popen(f'explorer "{os.path.join(root_dir, file)}"')
+                        return f"Found and opened {file}"
+            return f"No file named '{keyword}' found."
+    return None
+
+def calculate_expression(cmd):
+    try:
+        expression = cmd.replace("calculate", "").replace("calc", "").strip()
+        result = eval(expression)
+        return f"The result is {result}"
+    except:
+        return "Sorry, I couldn't calculate that."
+
+def perform_command(command):
+    cmd = command.lower()
+
+    if "time" in cmd:
+        return f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}."
+    elif "date" in cmd:
+        return f"Today is {datetime.datetime.now().strftime('%A, %B %d, %Y')}."
+
+    elif "open notepad" in cmd:
+        subprocess.Popen(["notepad.exe"]); return "Opening Notepad."
+    elif "open calculator" in cmd:
+        subprocess.Popen(["calc.exe"]); return "Opening Calculator."
+
+    elif "open youtube" in cmd:
+        search = cmd.replace("open youtube", "").strip()
+        if search:
+            webbrowser.open(f"https://www.youtube.com/results?search_query={search}")
+            return f"Opening YouTube and searching for {search}."
+        else:
+            webbrowser.open("https://www.youtube.com")
+            return "Opening YouTube."
+
+    elif "open google" in cmd:
+        search = cmd.replace("open google", "").strip()
+        if search:
+            webbrowser.open(f"https://www.google.com/search?q={search}")
+            return f"Searching Google for {search}."
+        else:
+            webbrowser.open("https://www.google.com")
+            return "Opening Google."
+
+    elif "open wikipedia" in cmd:
+        search = cmd.replace("open wikipedia", "").strip()
+        if search:
+            webbrowser.open(f"https://en.wikipedia.org/wiki/{search.replace(' ', '_')}")
+            return f"Opening Wikipedia page for {search}."
+        else:
+            webbrowser.open("https://www.wikipedia.org")
+            return "Opening Wikipedia."
+
+    elif "play music" in cmd: return play_music()
+    elif "pause music" in cmd: return pause_music()
+    elif "resume music" in cmd: return resume_music()
+    elif "next song" in cmd: return next_song()
+
+    file_cmd = manage_files(cmd)
+    if file_cmd: return file_cmd
+
+    if "calculate" in cmd or cmd.startswith("calc "):
+        return calculate_expression(cmd)
+
+    return None
+
+def bot_response(user_msg):
+    original_msg = user_msg
+    msg = user_msg.lower().strip()
+    if "aura" in msg:
+        msg = msg.replace("aura", "").strip()
+
+    cmd_response = perform_command(msg)
+    if cmd_response:
+        reply = cmd_response
+    else:
+        reply = next((responses[key] for key in responses if key in msg), "Sorry, I don't understand.")
+
+    chat_box.configure(state="normal")
+    chat_box.insert("end", f"You: {original_msg}\n", "user")
+    chat_box.insert("end", f"Aura: {reply}\n\n", "bot")
+    chat_box.configure(state="disabled"); chat_box.see("end")
+    speak(reply)
+
+def send_message(event=None):
+    msg = user_input.get().strip()
+    if msg:
+        user_input.set("")
+        bot_response(msg)
+
+def voice_input():
+    status_label.configure(text="🎤 Listening...")
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        try:
+            audio = r.listen(source, timeout=5)
+            text = r.recognize_google(audio)
+            status_label.configure(text=f"You said: {text}")
+            if text:
+                user_input.set(text)
+                send_message()
+        except:
+            status_label.configure(text="Voice input failed.")
+
+def clear_chat():
+    if messagebox.askyesno("Clear Chat", "Are you sure you want to delete all chat history?"):
+        chat_box.configure(state="normal")
+        chat_box.delete("1.0", "end")
+        chat_box.configure(state="disabled")
+        status_label.configure(text="Chat history cleared.")
+
+def toggle_theme():
+    mode = ctk.get_appearance_mode()
+    new_mode = "light" if mode == "Dark" else "dark"
+    ctk.set_appearance_mode(new_mode)
+
+def wake_word_listener():
+    r = sr.Recognizer()
+    while True:
+        try:
+            with sr.Microphone() as source:
+                audio = r.listen(source, timeout=2, phrase_time_limit=3)
+                try:
+                    text = r.recognize_google(audio).lower()
+                    if any(w in text for w in wake_word):
+                        status_label.configure(text="Wake word detected! Listening...")
+                        speak("Yes?")
+                        voice_input()
+                except:
+                    continue
+        except:
+            continue
+
+def build_ui():
+    global chat_box, user_input, status_label
+
+    root = ctk.CTk()
+    root.geometry("700x750")
+    root.title("Aura - AI Assistant")
+    root.resizable(False, False)
+
+    chat_box = ctk.CTkTextbox(root, width=650, height=400, corner_radius=12,
+                              fg_color="#2B2B2B", text_color="white", wrap="word")
+    chat_box.pack(pady=(20, 10))
+    chat_box.insert("end", f"Good {['Morning','Afternoon','Evening'][datetime.datetime.now().hour//8]}, Boss!\n", "system")
+    chat_box.tag_config("user", foreground="cyan")
+    chat_box.tag_config("bot", foreground="#3B82F6")
+    chat_box.tag_config("system", foreground="green")
+    chat_box.configure(state="disabled")
+
+    status_label = ctk.CTkLabel(root, text="Aura is online. Say 'Hey Aura' to start.", text_color="white")
+    status_label.pack(pady=(0, 10))
+
+    input_frame = ctk.CTkFrame(root, fg_color="transparent")
+    input_frame.pack(pady=(0, 10))
+
+    user_input = tk.StringVar()
+    entry = ctk.CTkEntry(input_frame, textvariable=user_input, width=500, height=40, corner_radius=10)
+    entry.grid(row=0, column=0, padx=(0, 10))
+    entry.bind("<Return>", send_message)
+
+    send_btn = ctk.CTkButton(input_frame, text="Send", width=70, corner_radius=8, command=send_message)
+    send_btn.grid(row=0, column=1, padx=(0, 5))
+
+    mic_btn = ctk.CTkButton(input_frame, text="🎤", width=40, corner_radius=8, fg_color="#ff5555", command=voice_input)
+    mic_btn.grid(row=0, column=2)
+
+    control_frame = ctk.CTkFrame(root, fg_color="transparent")
+    control_frame.pack(pady=(5, 15))
+
+    clear_btn = ctk.CTkButton(control_frame, text="🗑 Clear Chat", width=150, corner_radius=8, fg_color="#ff5555", command=clear_chat)
+    clear_btn.grid(row=0, column=0, padx=10)
+
+    theme_btn = ctk.CTkButton(control_frame, text="🌗 Toggle Theme", width=150, corner_radius=8, command=toggle_theme)
+    theme_btn.grid(row=0, column=1, padx=10)
+
+    threading.Thread(target=wake_word_listener, daemon=True).start()
+
+    root.mainloop()
+build_ui()
